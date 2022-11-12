@@ -1,61 +1,68 @@
 #include <algorithm>
 #include <cassert>
 #include <iostream>
+#include<stdio.h>
+#include<stdlib.h>
 #include <vector>
+#include <unistd.h>
 
 #include "body.h"
 
+#define DT 0.016666666666666666
 
 size_t interaction_num(size_t n) {
   return n * (n - 1) / 2;
 }
 
 // --- CUDA ---
-// CUDA kernel for vector addition
-// __global__ means this is called from the CPU, and runs on the GPU
-__global__ void grav(const double *__restrict x1, const double *__restrict y1,
-                     const double *__restrict x2, const double *__restrict y2,
-                     const double *__restrict m1,  // masses
-                     const double *__restrict m2,
-                     double *__restrict a_x, double *__restrict a_y, // Acceleration from 1 -> 2
+__global__ void grav(const float *__restrict x1, const float *__restrict y1,
+                     const float *__restrict x2, const float *__restrict y2,
+                     const float *__restrict m1,  // masses
+                     const float *__restrict m2,
+                     float *__restrict f_x, float *__restrict f_y, // Force from 1 -> 2
                      const int N) {
-  constexpr double G = 100.0;
-
   // Calculate global thread ID
   int tid = (blockIdx.x * blockDim.x) + threadIdx.x;
   if (tid >= N) return;
+  printf("Starting %d\n", tid);
 
   // F_vec = m a_vec
   // F_vec = (GMm/r^3) * r_vec
-  // a_vec = (GM/r^3) * r_vec for m1 = m
 
-  const double xdist = x2[tid] - x1[tid];
-  const double ydist = y2[tid] - y1[tid];
-  const double r = sqrt(xdist * xdist + ydist * ydist);
-  // Magnitude of a/distance
-  const double a = G * m2[tid] / (r * r * r);
+  printf("x1: %f\n", x1[tid]);
 
-  a_x[tid] = a * xdist;
-  a_y[tid] = a * ydist;
+  const float xdist = x2[tid] - x1[tid];
+  const float ydist = y2[tid] - y1[tid];
+  const float r = sqrt(xdist * xdist + ydist * ydist);
+  printf("r: %f\n", r);
+  // Magnitude of f with ratio of distance
+  const float f = 100.0 * m1[tid] * m2[tid] / (r * r * r);
+
+  // Force for this interaction
+  f_x[tid] = f * xdist;
+  f_y[tid] = f * ydist;
+
+  printf("f_x: %f\n", f_x[tid]);
+  printf("f_y: %f\n", f_y[tid]);
 }
 
 struct GPUState {
   int N, bytes;
   // Host
-  std::vector<double> x1, y1, x2, y2, m1, m2, a_x, a_y;
+  std::vector<float> x1, y1, x2, y2, m1, m2, f_x, f_y;
   // GPU
-  double *d_x1, *d_y1, *d_x2, *d_y2, *d_m1, *d_m2, *d_a_x, *d_a_y;
+  float *d_x1, *d_y1, *d_x2, *d_y2, *d_m1, *d_m2, *d_f_x, *d_f_y;
 
   GPUState(const int N_, const int bytes_) : N(N_), bytes(bytes_) {
     std::cout << "GPUState::GPUState starting." << std::endl;
-    x1 = std::vector<double>(N, 0.0);
-    y1 = std::vector<double>(N, 0.0);
-    x2 = std::vector<double>(N, 0.0);
-    y2 = std::vector<double>(N, 0.0);
-    m1 = std::vector<double>(N, 0.0);
-    m2 = std::vector<double>(N, 0.0);
-    a_x = std::vector<double>(N, 0.0);
-    a_y = std::vector<double>(N, 0.0);
+    x1 = std::vector<float>(N, 0.0);
+    y1 = std::vector<float>(N, 0.0);
+    x2 = std::vector<float>(N, 0.0);
+    y2 = std::vector<float>(N, 0.0);
+    m1 = std::vector<float>(N, 0.0);
+    m2 = std::vector<float>(N, 0.0);
+    f_x = std::vector<float>(N, 0.0);
+    f_y = std::vector<float>(N, 0.0);
 
     // Allocate memory on gpu
     cudaMalloc(&d_x1, bytes);
@@ -64,8 +71,8 @@ struct GPUState {
     cudaMalloc(&d_y2, bytes);
     cudaMalloc(&d_m1, bytes);
     cudaMalloc(&d_m2, bytes);
-    cudaMalloc(&d_a_x, bytes);
-    cudaMalloc(&d_a_y, bytes);
+    cudaMalloc(&d_f_x, bytes);
+    cudaMalloc(&d_f_y, bytes);
     std::cout << "GPUState::GPUState finished." << std::endl;
   }
 
@@ -78,8 +85,8 @@ struct GPUState {
     cudaFree(d_y2);
     cudaFree(d_m1);
     cudaFree(d_m2);
-    cudaFree(d_a_x);
-    cudaFree(d_a_y);
+    cudaFree(d_f_x);
+    cudaFree(d_f_y);
     std::cout << "GPUState::~GPUState finished." << std::endl;
   }
 
@@ -96,13 +103,13 @@ struct GPUState {
 
   void get_result() {
     std::cout << "GPUState::get_result starting." << std::endl;
-    cudaMemcpy(a_x.data(), d_a_x, bytes, cudaMemcpyHostToDevice);
-    cudaMemcpy(a_y.data(), d_a_y, bytes, cudaMemcpyHostToDevice);
+    cudaMemcpy(f_x.data(), d_f_x, bytes, cudaMemcpyDeviceToHost);
+    cudaMemcpy(f_y.data(), d_f_y, bytes, cudaMemcpyDeviceToHost);
     std::cout << "GPUState::get_result finished." << std::endl;
   }
 };
 
-void run_grav(GPUState gpu, std::vector<Body> bodies) {
+void run_grav(GPUState& gpu, std::vector<Body>& bodies) {
   std::cout << "Running grav..." << std::endl;
 
   size_t idx = 0;
@@ -122,37 +129,75 @@ void run_grav(GPUState gpu, std::vector<Body> bodies) {
   gpu.copy_to_device_buffers();
 
   // Threads per CTA
-  int NUM_THREADS = 256;
+  int NUM_THREADS = 1024;
 
   // CTAs per Grid
   // We need to launch at LEAST as many threads as we have elements
   // This equation pads an extra CTA to the grid if N cannot evenly be divided
-  // by NUM_THREADS (e.g. N = 257, NUM_THREADS = 256)
+  // by NUM_THREADS (e.g. N = 1025, NUM_THREADS = 1024)
   int NUM_BLOCKS = (gpu.N + NUM_THREADS - 1) / NUM_THREADS;
 
   // Launch the kernel on the GPU
   grav<<<NUM_BLOCKS, NUM_THREADS>>>(gpu.d_x1, gpu.d_y1, gpu.d_x2, gpu.d_y2,
-                                    gpu.d_m1, gpu.d_m2, gpu.d_a_x, gpu.d_a_y,
+                                    gpu.d_m1, gpu.d_m2, gpu.d_f_x, gpu.d_f_y,
                                     gpu.N);
 
   gpu.get_result();
 
+  // Apply acceleration and update positions
+  idx = 0;
+  float df_x, df_y;  // Delta force in this interaction
 
+  #pragma omp parallel for
+  for (size_t i = 0; i < bodies.size()-1; ++i) {
+    for (size_t j = i+1; j < bodies.size(); ++j) {
+      // v = integrate f/m dt
+      // x = integrate v dt
+      std::cout << "[HOST] gpu.f_x["<<idx<<"]: " << gpu.f_x[idx] << std::endl;
+      std::cout << "[HOST] gpu.f_y["<<idx<<"]: " << gpu.f_y[idx] << std::endl;
+
+      df_x = gpu.f_x[idx] * DT;
+      df_y = gpu.f_y[idx] * DT;
+      // Apply acceleration
+      bodies[i].vx += df_x / bodies[i].m;
+      bodies[i].vy += df_y / bodies[i].m;
+      bodies[j].vx -= df_x / bodies[j].m; // Opposite & equal force
+      bodies[j].vy -= df_y / bodies[j].m;
+
+      ++idx;
+    }
+  }
+
+  #pragma omp parallel for
+  for (size_t i = 0; i < bodies.size(); ++i) {
+    bodies[i].x += bodies[i].vx * DT;
+    bodies[i].y += bodies[i].vy * DT;
+  }
+
+  std::cout << "New positions:\n"
+            << "Body 0:\t" << bodies[0].x << ", " << bodies[0].y << std::endl
+            << "Body 1:\t" << bodies[1].x << ", " << bodies[1].y << std::endl
+            << "Body 2:\t" << bodies[2].x << ", " << bodies[2].y << std::endl;
 }
 
 // ------------
 
 int main() {
   std::vector<Body> bodies = {
-    Body(0.0, 0.0),
-    Body(1.0, 0.0),
+    Body(0.01, 0.01),
+    Body(50.0, 50.0),
+    Body(100.0, 0.1),
   };
 
   const int N = interaction_num(bodies.size());
-  const int bytes = sizeof(double) * N;
+  const int bytes = sizeof(float) * N;
   GPUState gpu(N, bytes);
 
-  run_grav(gpu, bodies);
+  for (size_t i = 0; i < 1; ++i) {
+    std::cout << "i: " << i << std::endl;
+    run_grav(gpu, bodies);
+    sleep(0.1);
+  }
 
   std::cout << "COMPLETED SUCCESSFULLY" << std::endl;
 

@@ -5,14 +5,14 @@
 class Body
 {
 public:
-  Body(double x, double y, double m = 1.0) :
+  Body(float x, float y, float m = 1.0) :
     x(x), y(y), m(m) {}
-  Body(double x, double y, double vx, double vy, double m = 1.0) :
+  Body(float x, float y, float vx, float vy, float m = 1.0) :
     x(x), y(y), vx(vx), vy(vy), m(m) {}
 
-  double x, y;
-  double vx, vy;
-  double m;
+  float x, y;
+  float vx, vy;
+  float m;
 };
 
 #endif // BODY_H
