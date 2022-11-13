@@ -50,7 +50,41 @@ __global__ void grav(const BodyGPU *__restrict bodies,
   f_y[tid] = f * ydist;
 }
 
-struct GPUState {
+class GPUState {
+public:
+  GPUState(const size_t Nbodies_) :
+    Ninteractions(interaction_num(Nbodies_)), Nbodies(Nbodies_) {
+    std::cout << "GPUState::GPUState starting." << std::endl;
+
+    alloc(Nbodies);
+
+    std::cout << "GPUState::GPUState finished." << std::endl;
+  }
+
+  ~GPUState() {
+    std::cout << "GPUState::~GPUState starting." << std::endl;
+    // Free memory on device
+    free();
+    std::cout << "GPUState::~GPUState finished." << std::endl;
+  }
+
+  void copy_to_device_buffers(const std::vector<Body>& bodies) {
+    for (size_t i = 0; i < bodies.size(); ++i) {
+      body_gpu_data[i] = bodies[i];
+    }
+    cudaMemcpy(d_b, body_gpu_data.data(), body_bytes, cudaMemcpyHostToDevice);
+  }
+
+  void fetch_result() {
+    cudaMemcpy(f_x.data(), d_f_x, interaction_bytes/2, cudaMemcpyDeviceToHost);
+    cudaMemcpy(f_y.data(), d_f_y, interaction_bytes/2, cudaMemcpyDeviceToHost);
+  }
+
+  void resize(const int Nbodies_) {
+    free();
+    alloc(Nbodies_);
+  }
+
   // Host
   size_t Ninteractions, Nbodies, interaction_bytes, body_bytes;
   std::vector<size_t> interactions;
@@ -61,15 +95,17 @@ struct GPUState {
   double *d_f_x, *d_f_y;
   size_t *d_interactions;
 
-  GPUState(const size_t Nbodies_, std::vector<Body>& bodies) :
-    Ninteractions(interaction_num(Nbodies_)), Nbodies(Nbodies_) {
-    std::cout << "GPUState::GPUState starting." << std::endl;
+private:
+  void alloc(const int Nbodies_) {
+    std::cout << "GPUState::alloc starting." << std::endl;
+    Nbodies = Nbodies_;
+    Ninteractions = interaction_num(Nbodies);
 
     // Allocate local memory
     f_x = std::vector<double>(Ninteractions, 0.0);
     f_y = std::vector<double>(Ninteractions, 0.0);
 
-    body_gpu_data.reserve(bodies.size());
+    body_gpu_data.resize(Nbodies);
 
     body_bytes = sizeof(BodyGPU) * Nbodies_;
     interaction_bytes = sizeof(size_t) * Ninteractions * 2;
@@ -94,29 +130,17 @@ struct GPUState {
     // Copy interactions to device
     cudaMemcpy(d_interactions, interactions.data(), interaction_bytes, cudaMemcpyHostToDevice);
 
-    std::cout << "GPUState::GPUState finished." << std::endl;
+    std::cout << "GPUState::alloc finished." << std::endl;
   }
 
-  ~GPUState() {
-    std::cout << "GPUState::~GPUState starting." << std::endl;
-    // Free memory on device
+  void free() {
+    std::cout << "GPUState::free starting." << std::endl;
+
     cudaFree(d_b);
     cudaFree(d_f_x);
     cudaFree(d_f_y);
     cudaFree(d_interactions);
-    std::cout << "GPUState::~GPUState finished." << std::endl;
-  }
-
-  void copy_to_device_buffers(const std::vector<Body>& bodies) {
-    for (size_t i = 0; i < bodies.size(); ++i) {
-      body_gpu_data[i] = bodies[i];
-    }
-    cudaMemcpy(d_b, body_gpu_data.data(), body_bytes, cudaMemcpyHostToDevice);
-  }
-
-  void fetch_result() {
-    cudaMemcpy(f_x.data(), d_f_x, interaction_bytes/2, cudaMemcpyDeviceToHost);
-    cudaMemcpy(f_y.data(), d_f_y, interaction_bytes/2, cudaMemcpyDeviceToHost);
+    std::cout << "GPUState::free finished." << std::endl;
   }
 };
 
@@ -155,7 +179,7 @@ inline void run_grav(GPUState& gpu, std::vector<Body>& bodies, double dt) {
     // Apply acceleration
     bodies[idx0].vx += df_x / bodies[idx0].m;
     bodies[idx0].vy += df_y / bodies[idx0].m;
-    bodies[idx1].vx -= df_x / bodies[idx1].m; // Opposite & equal force
+    bodies[idx1].vx -= df_x / bodies[idx1].m;  // Opposite & equal force
     bodies[idx1].vy -= df_y / bodies[idx1].m;
   }
 
@@ -167,7 +191,62 @@ inline void run_grav(GPUState& gpu, std::vector<Body>& bodies, double dt) {
 }
 
 // ------------
+// ----- Collisions -----
 
+std::vector<bool> check_coll(const std::vector<size_t>& interactions,
+                             std::vector<Body>& bodies) {
+  const size_t Ninteractions = interactions.size()/2;
+  std::vector<bool> colliding(Ninteractions, false);
+
+  size_t idx0, idx1;
+  double dist_x, dist_y, dist;
+  for (size_t i = 0; i < Ninteractions; ++i) {
+    idx0 = interactions[i];
+    idx1 = interactions[i + Ninteractions];
+
+    dist_x = bodies[idx1].x - bodies[idx0].x;
+    dist_y = bodies[idx1].y - bodies[idx0].y;
+    dist = sqrt(dist_x * dist_x + dist_y * dist_y);
+
+    colliding[i] = dist < bodies[idx0].r + bodies[idx1].r;
+  }
+
+  return colliding;
+}
+
+void collision_pass(GPUState& gpu, std::vector<Body>& bodies) {
+  const std::vector<bool> collisions = check_coll(gpu.interactions, bodies);
+  std::vector<bool> need_removing(bodies.size(), false);
+
+  bool at_least_one_needs_deleting = false;
+  size_t idx0, idx1;
+  for (size_t i = 0; i < gpu.Ninteractions; ++i) {
+    if (collisions[i]) {
+      std::cout << "COLLISION FOUND" << std::endl;
+      idx0 = gpu.interactions[i];
+      idx1 = gpu.interactions[i + gpu.Ninteractions];
+      // TODO: Work out collision stuff
+
+      // Clean them up
+      need_removing[idx0] = true;
+      need_removing[idx1] = true;
+      at_least_one_needs_deleting = true;
+    }
+  }
+
+  if (at_least_one_needs_deleting) {
+    bodies.erase(std::remove_if(bodies.begin(),
+                                bodies.end(),
+                                [&need_removing, &bodies](const Body& i) {
+                                  return need_removing.at(&i - bodies.data());
+                                }),
+                                bodies.end());
+
+    gpu.resize(bodies.size());
+  }
+}
+
+// --------------------
 // ----- Spawning -----
 void spawn_galaxy(std::vector<Body>& bodies, const double x,
                   const double y, const double inner_body_rad,
@@ -231,6 +310,7 @@ void spawn_random_uniform(std::vector<Body>& bodies,
 
 inline void update(GPUState& gpu, std::vector<Body>& bodies, double dt) {
   run_grav(gpu, bodies, dt);
+  collision_pass(gpu, bodies);
 }
 
 int main() {
@@ -258,7 +338,7 @@ int main() {
   */
 
   // Setup
-  GPUState gpu(bodies.size(), bodies);
+  GPUState gpu(bodies.size());
 
   sf::Clock clock;
   sf::ContextSettings settings;
@@ -303,7 +383,8 @@ int main() {
     }
 
     std::stringstream os;
-    os << "FPS: " << 1.0/dt;
+    os << "FPS: " << 1.0/dt << std::endl
+       << "Bodies: " << bodies.size();
     fps_text.setString(os.str());
     window.draw(fps_text);
     window.display();
