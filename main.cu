@@ -9,33 +9,41 @@
 
 #include <SFML/Graphics.hpp>
 
+#include "bodygpu.h"
 #include "body.h"
 
-#define G 100.0
+#define G 0.01
 
 size_t interaction_num(size_t n) {  // Get number of interactions for N bodies
   return n * (n - 1) / 2;
 }
 
+
+// TODO: Pass C++ objects
 // --- CUDA ---
-__global__ void grav(const double *__restrict x1, const double *__restrict y1,
-                     const double *__restrict x2, const double *__restrict y2,
-                     const double *__restrict m1,  // masses
-                     const double *__restrict m2,
-                     double *__restrict f_x, double *__restrict f_y, // Force from 1 -> 2
-                     const int N) {
+// TODO: Could just pass an index map, and just copy body data with no duplicates
+// interactions: []
+__global__ void grav(const BodyGPU *__restrict bodies,
+                     const size_t *__restrict interactions, // 2D Index map. len = 2N interaction
+                     double *__restrict f_x, double *__restrict f_y, // Force from 1 -> 2. len = N interaction
+                     const size_t N) {
   // Calculate global thread ID
-  int tid = (blockIdx.x * blockDim.x) + threadIdx.x;
+  size_t tid = (blockIdx.x * blockDim.x) + threadIdx.x;
   if (tid >= N) return;
 
+  const BodyGPU& body1 = bodies[interactions[tid]];
+  const BodyGPU& body2 = bodies[interactions[tid + N]];
+
+  printf("[DEVICE %d] Body1 pos y: %f\n", tid, body1.y);
+  printf("[DEVICE %d] Body2 pos y: %f\n", tid, body1.y);
   // F_vec = m a_vec
   // F_vec = (GMm/r^3) * r_vec
 
-  const double xdist = x2[tid] - x1[tid];
-  const double ydist = y2[tid] - y1[tid];
+  const double xdist = body2.x - body1.x;
+  const double ydist = body2.y - body1.y;
   const double r = sqrt(xdist * xdist + ydist * ydist);
   // Magnitude of f with ratio of distance
-  const double f = G * m1[tid] * m2[tid] / (r * r * r);
+  const double f = G * body1.m * body2.m / (r * r * r);
 
   // Force for this interaction
   f_x[tid] = f * xdist;
@@ -43,99 +51,96 @@ __global__ void grav(const double *__restrict x1, const double *__restrict y1,
 }
 
 struct GPUState {
-  int N, bytes;
   // Host
-  std::vector<double> x1, y1, x2, y2, m1, m2, f_x, f_y;
+  size_t Ninteractions, Nbodies, interaction_bytes, body_bytes;
+  std::vector<double> f_x, f_y; // Interaction forces
+  std::vector<BodyGPU> body_gpu_data;
   // GPU
-  double *d_x1, *d_y1, *d_x2, *d_y2, *d_m1, *d_m2, *d_f_x, *d_f_y;
+  BodyGPU *d_b;
+  double *d_f_x, *d_f_y;
+  size_t *d_interactions;
 
-  GPUState(const int N_, const int bytes_) : N(N_), bytes(bytes_) {
+  GPUState(const size_t Nbodies_, std::vector<Body>& bodies) :
+    Ninteractions(interaction_num(Nbodies_)), Nbodies(Nbodies_) {
     std::cout << "GPUState::GPUState starting." << std::endl;
-    x1 = std::vector<double>(N, 0.0);
-    y1 = std::vector<double>(N, 0.0);
-    x2 = std::vector<double>(N, 0.0);
-    y2 = std::vector<double>(N, 0.0);
-    m1 = std::vector<double>(N, 0.0);
-    m2 = std::vector<double>(N, 0.0);
-    f_x = std::vector<double>(N, 0.0);
-    f_y = std::vector<double>(N, 0.0);
 
+    // Allocate local memory
+    f_x = std::vector<double>(Ninteractions, 0.0);
+    f_y = std::vector<double>(Ninteractions, 0.0);
+
+    body_gpu_data.reserve(bodies.size());
+
+    body_bytes = sizeof(BodyGPU) * Nbodies_;
+    interaction_bytes = sizeof(size_t) * Ninteractions * 2;
     // Allocate memory on gpu
-    cudaMalloc(&d_x1, bytes);
-    cudaMalloc(&d_y1, bytes);
-    cudaMalloc(&d_x2, bytes);
-    cudaMalloc(&d_y2, bytes);
-    cudaMalloc(&d_m1, bytes);
-    cudaMalloc(&d_m2, bytes);
-    cudaMalloc(&d_f_x, bytes);
-    cudaMalloc(&d_f_y, bytes);
+    cudaMalloc(&d_b, body_bytes);
+    cudaMalloc(&d_f_x, interaction_bytes / 2);
+    cudaMalloc(&d_f_y, interaction_bytes / 2);
+
+    // Setup interactions
+    cudaMalloc(&d_interactions, interaction_bytes);
+
+    std::vector<size_t> interactions(Ninteractions * 2, 0);
+
+    size_t idx = 0;
+    for (size_t i = 0; i < Nbodies - 1; ++i) {
+      for (size_t j = i + 1; j < Nbodies; ++j) {
+        interactions[idx] = i;
+        interactions[idx + Ninteractions] = j;
+        ++idx;
+      }
+    }
+    // Copy interactions to device
+    cudaMemcpy(d_interactions, interactions.data(), interaction_bytes, cudaMemcpyHostToDevice);
+
     std::cout << "GPUState::GPUState finished." << std::endl;
   }
 
   ~GPUState() {
     std::cout << "GPUState::~GPUState starting." << std::endl;
     // Free memory on device
-    cudaFree(d_x1);
-    cudaFree(d_y1);
-    cudaFree(d_x2);
-    cudaFree(d_y2);
-    cudaFree(d_m1);
-    cudaFree(d_m2);
+    cudaFree(d_b);
     cudaFree(d_f_x);
     cudaFree(d_f_y);
+    cudaFree(d_interactions);
     std::cout << "GPUState::~GPUState finished." << std::endl;
   }
 
-  void copy_to_device_buffers() {
-    cudaMemcpy(d_x1, x1.data(), bytes, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_y1, y1.data(), bytes, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_x2, x2.data(), bytes, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_y2, y2.data(), bytes, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_m1, m1.data(), bytes, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_m2, m2.data(), bytes, cudaMemcpyHostToDevice);
+  void copy_to_device_buffers(const std::vector<Body>& bodies) {
+    for (size_t i = 0; i < bodies.size(); ++i) {
+      body_gpu_data[i] = bodies[i];
+    }
+    cudaMemcpy(d_b, body_gpu_data.data(), body_bytes, cudaMemcpyHostToDevice);
   }
 
-  void get_result() {
-    cudaMemcpy(f_x.data(), d_f_x, bytes, cudaMemcpyDeviceToHost);
-    cudaMemcpy(f_y.data(), d_f_y, bytes, cudaMemcpyDeviceToHost);
+  void fetch_result() {
+    cudaMemcpy(f_x.data(), d_f_x, interaction_bytes/2, cudaMemcpyDeviceToHost);
+    cudaMemcpy(f_y.data(), d_f_y, interaction_bytes/2, cudaMemcpyDeviceToHost);
   }
 };
 
 void run_grav(GPUState& gpu, std::vector<Body>& bodies, double dt) {
-  size_t idx = 0;
-  for (size_t i = 0; i < bodies.size()-1; ++i) {
-    for (size_t j = i+1; j < bodies.size(); ++j) {
-      gpu.x1[idx] = bodies[i].x;
-      gpu.y1[idx] = bodies[i].y;
-      gpu.x2[idx] = bodies[j].x;
-      gpu.y2[idx] = bodies[j].y;
-      gpu.m1[idx] = bodies[i].m;
-      gpu.m2[idx] = bodies[j].m;
-      ++idx;
-    }
-  }
-
   // Copy data to GPU buffers
-  gpu.copy_to_device_buffers();
+  gpu.copy_to_device_buffers(bodies);
 
   // Threads per CTA
-  int NUM_THREADS = 1024;
+  size_t NUM_THREADS = 1024;
 
   // CTAs per Grid
   // We need to launch at LEAST as many threads as we have elements
   // This equation pads an extra CTA to the grid if N cannot evenly be divided
   // by NUM_THREADS (e.g. N = 1025, NUM_THREADS = 1024)
-  int NUM_BLOCKS = (gpu.N + NUM_THREADS - 1) / NUM_THREADS;
+  size_t NUM_BLOCKS = (gpu.Ninteractions + NUM_THREADS - 1) / NUM_THREADS;
 
   // Launch the kernel on the GPU
-  grav<<<NUM_BLOCKS, NUM_THREADS>>>(gpu.d_x1, gpu.d_y1, gpu.d_x2, gpu.d_y2,
-                                    gpu.d_m1, gpu.d_m2, gpu.d_f_x, gpu.d_f_y,
-                                    gpu.N);
+  grav<<<NUM_BLOCKS, NUM_THREADS>>>(gpu.d_b, gpu.d_interactions,
+                                    gpu.d_f_x, gpu.d_f_y,
+                                    gpu.Ninteractions);
 
-  gpu.get_result();
+  gpu.fetch_result();
 
   // Apply acceleration and update positions
-  idx = 0;
+  size_t idx = 0;
   double df_x, df_y;  // Delta force in this interaction
 
   #pragma omp parallel for
@@ -145,6 +150,7 @@ void run_grav(GPUState& gpu, std::vector<Body>& bodies, double dt) {
       // x = integrate v dt
       df_x = gpu.f_x[idx] * dt;
       df_y = gpu.f_y[idx] * dt;
+      std::cout << "f_y: " << gpu.f_y[idx] << std::endl;
       // Apply acceleration
       bodies[i].vx += df_x / bodies[i].m;
       bodies[i].vy += df_y / bodies[i].m;
@@ -202,16 +208,19 @@ void update(GPUState& gpu, std::vector<Body>& bodies, double dt) {
 int main() {
   std::vector<Body> bodies;
 
-  spawn_galaxy(bodies, 400.0, 400.0, 10000.0,
-               110.0, 300.0, 100);
+//  spawn_galaxy(bodies, 400.0, 400.0, 10000.0,
+//               110.0, 400.0, 1000);
+
+  bodies = {
+    Body(100.0, 100.0, 10.0),
+    Body(100.0, 200.0, 10.0),
+  };
 
   // Setup
-  const int N = interaction_num(bodies.size());
-  const int bytes = sizeof(double) * N;
-  GPUState gpu(N, bytes);
+  GPUState gpu(bodies.size(), bodies);
 
   sf::Clock clock;
-  sf::RenderWindow window(sf::VideoMode(800, 800), "SFML works!");
+  sf::RenderWindow window(sf::VideoMode(800, 800), "SFML");
   sf::CircleShape body_shape(1.f);
   body_shape.setFillColor(sf::Color::White);
 
@@ -232,6 +241,7 @@ int main() {
     window.clear();
     for (const auto & b : bodies) {
       body_shape.setPosition(b.x, b.y);
+      body_shape.setScale(b.r, b.r);
       window.draw(body_shape);
     }
     window.display();
