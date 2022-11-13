@@ -12,7 +12,6 @@
 #include <SFML/Graphics.hpp>
 
 #include "commons.h"
-#include "tools.h"
 #include "bodygpu.h"
 #include "body.h"
 #include "mainstate.h"
@@ -105,7 +104,6 @@ int main() {
     Body(150.0, 155.1, 25.0)
   };
   */
-
 
   // Setup
   MainState state(bodies);
