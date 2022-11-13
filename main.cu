@@ -6,9 +6,10 @@
 #include <vector>
 #include <unistd.h>
 
+#include <SFML/Graphics.hpp>
+
 #include "body.h"
 
-#define DT 0.016666666666666666
 
 size_t interaction_num(size_t n) {  // Get number of interactions for N bodies
   return n * (n - 1) / 2;
@@ -84,27 +85,21 @@ struct GPUState {
   }
 
   void copy_to_device_buffers() {
-    std::cout << "GPUState::copy_to_device_buffers starting." << std::endl;
     cudaMemcpy(d_x1, x1.data(), bytes, cudaMemcpyHostToDevice);
     cudaMemcpy(d_y1, y1.data(), bytes, cudaMemcpyHostToDevice);
     cudaMemcpy(d_x2, x2.data(), bytes, cudaMemcpyHostToDevice);
     cudaMemcpy(d_y2, y2.data(), bytes, cudaMemcpyHostToDevice);
     cudaMemcpy(d_m1, m1.data(), bytes, cudaMemcpyHostToDevice);
     cudaMemcpy(d_m2, m2.data(), bytes, cudaMemcpyHostToDevice);
-    std::cout << "GPUState::copy_to_device_buffers finished." << std::endl;
   }
 
   void get_result() {
-    std::cout << "GPUState::get_result starting." << std::endl;
     cudaMemcpy(f_x.data(), d_f_x, bytes, cudaMemcpyDeviceToHost);
     cudaMemcpy(f_y.data(), d_f_y, bytes, cudaMemcpyDeviceToHost);
-    std::cout << "GPUState::get_result finished." << std::endl;
   }
 };
 
-void run_grav(GPUState& gpu, std::vector<Body>& bodies) {
-  std::cout << "Running grav..." << std::endl;
-
+void run_grav(GPUState& gpu, std::vector<Body>& bodies, double dt) {
   size_t idx = 0;
   for (size_t i = 0; i < bodies.size()-1; ++i) {
     for (size_t j = i+1; j < bodies.size(); ++j) {
@@ -146,8 +141,8 @@ void run_grav(GPUState& gpu, std::vector<Body>& bodies) {
     for (size_t j = i+1; j < bodies.size(); ++j) {
       // v = integrate f/m dt
       // x = integrate v dt
-      df_x = gpu.f_x[idx] * DT;
-      df_y = gpu.f_y[idx] * DT;
+      df_x = gpu.f_x[idx] * dt;
+      df_y = gpu.f_y[idx] * dt;
       // Apply acceleration
       bodies[i].vx += df_x / bodies[i].m;
       bodies[i].vy += df_y / bodies[i].m;
@@ -160,17 +155,17 @@ void run_grav(GPUState& gpu, std::vector<Body>& bodies) {
 
   #pragma omp parallel for
   for (size_t i = 0; i < bodies.size(); ++i) {
-    bodies[i].x += bodies[i].vx * DT;
-    bodies[i].y += bodies[i].vy * DT;
+    bodies[i].x += bodies[i].vx * dt;
+    bodies[i].y += bodies[i].vy * dt;
   }
-
-  std::cout << "New positions:\n"
-            << "Body 0:\t" << bodies[0].x << ", " << bodies[0].y << std::endl
-            << "Body 1:\t" << bodies[1].x << ", " << bodies[1].y << std::endl
-            << "Body 2:\t" << bodies[2].x << ", " << bodies[2].y << std::endl;
 }
 
 // ------------
+
+void update(GPUState& gpu, std::vector<Body>& bodies, double dt) {
+  std::cout << "FPS: " << 1.0/dt << std::endl;
+  run_grav(gpu, bodies, dt);
+}
 
 int main() {
   std::vector<Body> bodies = {
@@ -179,17 +174,37 @@ int main() {
     Body(100.0, 0.1),
   };
 
+  // Setup
   const int N = interaction_num(bodies.size());
   const int bytes = sizeof(double) * N;
   GPUState gpu(N, bytes);
 
-  for (size_t i = 0; i < 5; ++i) {
-    std::cout << "i: " << i << std::endl;
-    run_grav(gpu, bodies);
-    sleep(0.1);
-  }
+  sf::Clock clock;
+  sf::RenderWindow window(sf::VideoMode(200, 200), "SFML works!");
+  sf::CircleShape body_shape(5.f);
+  body_shape.setFillColor(sf::Color::White);
 
-  std::cout << "COMPLETED SUCCESSFULLY" << std::endl;
+  // Main loop
+  while (window.isOpen()) {
+    sf::Event event;
+
+    while (window.pollEvent(event)) {
+      if (event.type == sf::Event::Closed) {
+        window.close();
+      }
+    }
+
+    sf::Time elapsed = clock.restart();
+
+    update(gpu, bodies, static_cast<double>(elapsed.asSeconds()));
+
+    window.clear();
+    for (const auto & b : bodies) {
+      body_shape.setPosition(b.x, b.y);
+      window.draw(body_shape);
+    }
+    window.display();
+  }
 
   return 0;
 }
