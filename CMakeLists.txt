@@ -9,9 +9,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_executable(orbits_gpu main.cu
                bodygpu.h bodygpu.cpp
-               body.h)
+               body.h
+               tools.h)
 
-target_link_libraries(orbits_gpu sfml-graphics sfml-window sfml-system)
+
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+   target_link_libraries(orbits_gpu PUBLIC OpenMP::OpenMP_CXX sfml-graphics sfml-window sfml-system)
+else()
+    target_link_libraries(orbits_gpu sfml-graphics sfml-window sfml-system)
+endif()
+
 target_compile_features(orbits_gpu PUBLIC cxx_std_11)
 set_target_properties(orbits_gpu
                       PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
