@@ -10,16 +10,16 @@
 
 #define DT 0.016666666666666666
 
-size_t interaction_num(size_t n) {
+size_t interaction_num(size_t n) {  // Get number of interactions for N bodies
   return n * (n - 1) / 2;
 }
 
 // --- CUDA ---
-__global__ void grav(const float *__restrict x1, const float *__restrict y1,
-                     const float *__restrict x2, const float *__restrict y2,
-                     const float *__restrict m1,  // masses
-                     const float *__restrict m2,
-                     float *__restrict f_x, float *__restrict f_y, // Force from 1 -> 2
+__global__ void grav(const double *__restrict x1, const double *__restrict y1,
+                     const double *__restrict x2, const double *__restrict y2,
+                     const double *__restrict m1,  // masses
+                     const double *__restrict m2,
+                     double *__restrict f_x, double *__restrict f_y, // Force from 1 -> 2
                      const int N) {
   // Calculate global thread ID
   int tid = (blockIdx.x * blockDim.x) + threadIdx.x;
@@ -28,11 +28,11 @@ __global__ void grav(const float *__restrict x1, const float *__restrict y1,
   // F_vec = m a_vec
   // F_vec = (GMm/r^3) * r_vec
 
-  const float xdist = x2[tid] - x1[tid];
-  const float ydist = y2[tid] - y1[tid];
-  const float r = sqrt(xdist * xdist + ydist * ydist);
+  const double xdist = x2[tid] - x1[tid];
+  const double ydist = y2[tid] - y1[tid];
+  const double r = sqrt(xdist * xdist + ydist * ydist);
   // Magnitude of f with ratio of distance
-  const float f = 100.0 * m1[tid] * m2[tid] / (r * r * r);
+  const double f = 100.0 * m1[tid] * m2[tid] / (r * r * r);
 
   // Force for this interaction
   f_x[tid] = f * xdist;
@@ -42,20 +42,20 @@ __global__ void grav(const float *__restrict x1, const float *__restrict y1,
 struct GPUState {
   int N, bytes;
   // Host
-  std::vector<float> x1, y1, x2, y2, m1, m2, f_x, f_y;
+  std::vector<double> x1, y1, x2, y2, m1, m2, f_x, f_y;
   // GPU
-  float *d_x1, *d_y1, *d_x2, *d_y2, *d_m1, *d_m2, *d_f_x, *d_f_y;
+  double *d_x1, *d_y1, *d_x2, *d_y2, *d_m1, *d_m2, *d_f_x, *d_f_y;
 
   GPUState(const int N_, const int bytes_) : N(N_), bytes(bytes_) {
     std::cout << "GPUState::GPUState starting." << std::endl;
-    x1 = std::vector<float>(N, 0.0);
-    y1 = std::vector<float>(N, 0.0);
-    x2 = std::vector<float>(N, 0.0);
-    y2 = std::vector<float>(N, 0.0);
-    m1 = std::vector<float>(N, 0.0);
-    m2 = std::vector<float>(N, 0.0);
-    f_x = std::vector<float>(N, 0.0);
-    f_y = std::vector<float>(N, 0.0);
+    x1 = std::vector<double>(N, 0.0);
+    y1 = std::vector<double>(N, 0.0);
+    x2 = std::vector<double>(N, 0.0);
+    y2 = std::vector<double>(N, 0.0);
+    m1 = std::vector<double>(N, 0.0);
+    m2 = std::vector<double>(N, 0.0);
+    f_x = std::vector<double>(N, 0.0);
+    f_y = std::vector<double>(N, 0.0);
 
     // Allocate memory on gpu
     cudaMalloc(&d_x1, bytes);
@@ -139,7 +139,7 @@ void run_grav(GPUState& gpu, std::vector<Body>& bodies) {
 
   // Apply acceleration and update positions
   idx = 0;
-  float df_x, df_y;  // Delta force in this interaction
+  double df_x, df_y;  // Delta force in this interaction
 
   #pragma omp parallel for
   for (size_t i = 0; i < bodies.size()-1; ++i) {
@@ -180,7 +180,7 @@ int main() {
   };
 
   const int N = interaction_num(bodies.size());
-  const int bytes = sizeof(float) * N;
+  const int bytes = sizeof(double) * N;
   GPUState gpu(N, bytes);
 
   for (size_t i = 0; i < 5; ++i) {
