@@ -24,26 +24,19 @@ __global__ void grav(const float *__restrict x1, const float *__restrict y1,
   // Calculate global thread ID
   int tid = (blockIdx.x * blockDim.x) + threadIdx.x;
   if (tid >= N) return;
-  printf("Starting %d\n", tid);
 
   // F_vec = m a_vec
   // F_vec = (GMm/r^3) * r_vec
 
-  printf("x1: %f\n", x1[tid]);
-
   const float xdist = x2[tid] - x1[tid];
   const float ydist = y2[tid] - y1[tid];
   const float r = sqrt(xdist * xdist + ydist * ydist);
-  printf("r: %f\n", r);
   // Magnitude of f with ratio of distance
   const float f = 100.0 * m1[tid] * m2[tid] / (r * r * r);
 
   // Force for this interaction
   f_x[tid] = f * xdist;
   f_y[tid] = f * ydist;
-
-  printf("f_x: %f\n", f_x[tid]);
-  printf("f_y: %f\n", f_y[tid]);
 }
 
 struct GPUState {
@@ -153,9 +146,6 @@ void run_grav(GPUState& gpu, std::vector<Body>& bodies) {
     for (size_t j = i+1; j < bodies.size(); ++j) {
       // v = integrate f/m dt
       // x = integrate v dt
-      std::cout << "[HOST] gpu.f_x["<<idx<<"]: " << gpu.f_x[idx] << std::endl;
-      std::cout << "[HOST] gpu.f_y["<<idx<<"]: " << gpu.f_y[idx] << std::endl;
-
       df_x = gpu.f_x[idx] * DT;
       df_y = gpu.f_y[idx] * DT;
       // Apply acceleration
@@ -193,7 +183,7 @@ int main() {
   const int bytes = sizeof(float) * N;
   GPUState gpu(N, bytes);
 
-  for (size_t i = 0; i < 1; ++i) {
+  for (size_t i = 0; i < 5; ++i) {
     std::cout << "i: " << i << std::endl;
     run_grav(gpu, bodies);
     sleep(0.1);
