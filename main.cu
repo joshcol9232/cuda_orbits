@@ -1,15 +1,17 @@
 #include <algorithm>
 #include <cassert>
 #include <iostream>
-#include<stdio.h>
-#include<stdlib.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <vector>
-#include <unistd.h>
+#include <random>
+#include <cmath>
 
 #include <SFML/Graphics.hpp>
 
 #include "body.h"
 
+#define G 100.0
 
 size_t interaction_num(size_t n) {  // Get number of interactions for N bodies
   return n * (n - 1) / 2;
@@ -33,7 +35,7 @@ __global__ void grav(const double *__restrict x1, const double *__restrict y1,
   const double ydist = y2[tid] - y1[tid];
   const double r = sqrt(xdist * xdist + ydist * ydist);
   // Magnitude of f with ratio of distance
-  const double f = 100.0 * m1[tid] * m2[tid] / (r * r * r);
+  const double f = G * m1[tid] * m2[tid] / (r * r * r);
 
   // Force for this interaction
   f_x[tid] = f * xdist;
@@ -162,17 +164,46 @@ void run_grav(GPUState& gpu, std::vector<Body>& bodies, double dt) {
 
 // ------------
 
+void spawn_galaxy(std::vector<Body>& bodies, const double x,
+                  const double y, const double inner_mass,
+                  const double inner_rad, const double outer_rad,
+                  const size_t num) {
+  constexpr double M = 10.0;
+
+  bodies.reserve(bodies.size() + num + 1);
+
+  // Central body
+  bodies.emplace_back(Body(x, y, inner_mass));
+
+  // Make random gen
+  std::default_random_engine generator;
+  std::uniform_real_distribution<double> distribution(inner_rad, outer_rad);
+  std::uniform_real_distribution<double> angle_distribution(0.0, M_PI * 2);
+
+  double r, v, theta;
+  Body b;
+  for (size_t n = 0; n < num; ++n) {
+    r = distribution(generator);
+    theta = angle_distribution(generator);
+    // sqrt(GM/r) = v
+    v = sqrt(G * inner_mass / r);
+
+    b = Body(r * cos(theta) + x, r * sin(theta) + y,
+             v * cos(theta + M_PI/2.0), v * sin(theta + M_PI/2.0), M);
+    bodies.emplace_back(b);
+  }
+}
+
 void update(GPUState& gpu, std::vector<Body>& bodies, double dt) {
-  std::cout << "FPS: " << 1.0/dt << std::endl;
+//  std::cout << "FPS: " << 1.0/dt << std::endl;
   run_grav(gpu, bodies, dt);
 }
 
 int main() {
-  std::vector<Body> bodies = {
-    Body(0.01, 0.01),
-    Body(50.0, 50.0),
-    Body(100.0, 0.1),
-  };
+  std::vector<Body> bodies;
+
+  spawn_galaxy(bodies, 400.0, 400.0, 10000.0,
+               110.0, 300.0, 100);
 
   // Setup
   const int N = interaction_num(bodies.size());
@@ -180,8 +211,8 @@ int main() {
   GPUState gpu(N, bytes);
 
   sf::Clock clock;
-  sf::RenderWindow window(sf::VideoMode(200, 200), "SFML works!");
-  sf::CircleShape body_shape(5.f);
+  sf::RenderWindow window(sf::VideoMode(800, 800), "SFML works!");
+  sf::CircleShape body_shape(1.f);
   body_shape.setFillColor(sf::Color::White);
 
   // Main loop

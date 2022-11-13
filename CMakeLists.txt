@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_executable(orbits_gpu main.cu
-               body.h body.cpp)
+               body.h)
 
 target_link_libraries(orbits_gpu sfml-graphics sfml-window sfml-system)
 target_compile_features(orbits_gpu PUBLIC cxx_std_11)
