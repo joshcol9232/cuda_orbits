@@ -9,8 +9,6 @@ public:
   BodyGPU(double x, double y, double m) :
     x(x), y(y), m(m) {}
 
-  void operator=(const BodyGPU& b);
-
   double x, y;
   double m;
 };
