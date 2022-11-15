@@ -88,7 +88,6 @@ int main() {
                50.0, 300.0,
                0.25, 2.0, 800);
 
-
   /*
   spawn_random_uniform(bodies,
                        0.0, 1280.0/5,

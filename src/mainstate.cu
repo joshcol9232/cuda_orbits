@@ -48,7 +48,6 @@ void MainState::update(double dt) {
   collision_pass();
 }
 
-
 void MainState::run_grav(double dt) {
   // Copy data to GPU buffers
   gpu_.copy_to_device_buffers(bodies_);
