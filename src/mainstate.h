@@ -5,7 +5,6 @@
 #include <SFML/Graphics.hpp>
 
 #include "body.h"
-#include "gpustate.h"
 
 class MainState {
 public:
@@ -19,7 +18,6 @@ public:
   const std::vector<Body>& bodies() const { return bodies_; }
   size_t body_num() const { return bodies_.size(); }
 private:
-  GPUState gpu_;
   std::vector<Body> bodies_;
   std::vector<bool> colliding_;
   std::vector<bool> need_removing_;
