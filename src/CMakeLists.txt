@@ -2,7 +2,6 @@ add_executable(orbits_gpu main.cpp
                commons.h
                gpustate.cu gpustate.h
                tools.h tools.cpp
-               bodygpu.h
                body.h body.cpp
                mainstate.h mainstate.cu)
 

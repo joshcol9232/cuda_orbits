@@ -5,11 +5,7 @@
 
 namespace tools {
 
-double mass_from_radius(double r) {
-  return 4.0/3.0 * M_PI * r * r *r * DENSITY;
-}
-
-double mass_from_radius(double r, double density) {
+double mass_from_radius(double r, double density = DENSITY) {
   return 4.0/3.0 * M_PI * r * r * r * density;
 }
 

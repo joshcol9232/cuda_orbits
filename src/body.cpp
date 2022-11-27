@@ -18,3 +18,8 @@ void Body::collide_with(const Body& other) {
   m = total_mass;
 }
 
+void Body::collide_with_no_join(Body& other) {
+  // Elastic collision
+
+
+}

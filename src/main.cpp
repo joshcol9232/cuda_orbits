@@ -12,7 +12,6 @@
 #include <SFML/Graphics.hpp>
 
 #include "commons.h"
-#include "bodygpu.h"
 #include "body.h"
 #include "mainstate.h"
 

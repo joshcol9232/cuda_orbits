@@ -4,7 +4,6 @@
 #include <vector>
 #include <stddef.h>
 #include "body.h"
-#include "bodygpu.h"
 
 class GPUState {
 public:
@@ -20,9 +19,9 @@ public:
   size_t Ninteractions, Nbodies, interaction_bytes, body_bytes;
   std::vector<size_t> interactions;
   std::vector<double> f_x, f_y, dist; // Interactions
-  std::vector<BodyGPU> body_gpu_data;
+  std::vector<Body> body_gpu_data;
   // GPU
-  BodyGPU *d_b;
+  Body *d_b;
   double *d_f_x, *d_f_y, *d_dist;
   size_t *d_interactions;
 

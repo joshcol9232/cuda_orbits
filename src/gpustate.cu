@@ -1,7 +1,7 @@
 #include <iostream>
 
 #include "gpustate.h"
-#include "bodygpu.h"
+#include "body.h"
 #include "tools.h"
 
 GPUState::GPUState(const size_t Nbodies_) :
@@ -50,7 +50,7 @@ void GPUState::alloc(const int Nbodies_) {
 
   body_gpu_data.resize(Nbodies);
 
-  body_bytes = sizeof(BodyGPU) * Nbodies_;
+  body_bytes = sizeof(Body) * Nbodies_;
   interaction_bytes = sizeof(size_t) * Ninteractions * 2;
   // Allocate memory on gpu
   cudaMalloc(&d_b, body_bytes);

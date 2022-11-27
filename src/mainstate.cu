@@ -1,12 +1,10 @@
 #include <algorithm>
 
-
 #include "mainstate.h"
 #include "body.h"
-#include "bodygpu.h"
 
 // --- CUDA ---
-__global__ void grav(const BodyGPU *__restrict bodies,
+__global__ void grav(const Body *__restrict bodies,
                      const size_t *__restrict interactions, // 2D Index map. len = 2N interaction
                      double *__restrict f_x, double *__restrict f_y, // Force from 1 -> 2. len = N interaction
                      double *__restrict dist,
@@ -15,8 +13,8 @@ __global__ void grav(const BodyGPU *__restrict bodies,
   size_t tid = (blockIdx.x * blockDim.x) + threadIdx.x;
   if (tid >= N) return;
 
-  const BodyGPU& body1 = bodies[interactions[tid]];
-  const BodyGPU& body2 = bodies[interactions[tid + N]];
+  const Body& body1 = bodies[interactions[tid]];
+  const Body& body2 = bodies[interactions[tid + N]];
 
   // F_vec = m a_vec
   // F_vec = (GMm/r^3) * r_vec
@@ -102,6 +100,7 @@ bool MainState::check_coll() {
   size_t idx0, idx1;
   bool any_colliding, col;
 
+  #pragma omp parallel for
   for (size_t i = 0; i < gpu_.Ninteractions; ++i) {
     idx0 = gpu_.interactions[i];
     idx1 = gpu_.interactions[i + gpu_.Ninteractions];
@@ -116,32 +115,48 @@ bool MainState::check_coll() {
 
 void MainState::collision_pass() {
   const bool any_colliding = check_coll();
-  need_removing_.assign(bodies_.size(), false);
 
-  bool at_least_one_needs_deleting = false;
   size_t idx0, idx1;
 
   for (size_t i = 0; i < gpu_.Ninteractions; ++i) {
     if (colliding_[i]) {
       idx0 = gpu_.interactions[i];
       idx1 = gpu_.interactions[i + gpu_.Ninteractions];
-      // TODO: Work out collision stuff
 
-      bodies_[idx0].collide_with(bodies_[idx1]);
-      // Clean the second one up (first is new bigger planet)
-      need_removing_[idx1] = true;
-      at_least_one_needs_deleting = true;
+      bodies_[idx0].collide_with_no_join(bodies_[idx1]);
+
+//      colliding_[i] = false;
     }
   }
-
-  if (at_least_one_needs_deleting) {
-    bodies_.erase(std::remove_if(bodies_.begin(),
-                                 bodies_.end(),
-                                 [this](const Body& i) {
-                                   return need_removing_.at(&i - bodies_.data());
-                                 }),
-                                 bodies_.end());
-
-    gpu_.resize(bodies_.size());
-  }
 }
+
+//void MainState::collision_pass() {
+//  const bool any_colliding = check_coll();
+//  need_removing_.assign(bodies_.size(), false);
+
+//  bool at_least_one_needs_deleting = false;
+//  size_t idx0, idx1;
+
+//  for (size_t i = 0; i < gpu_.Ninteractions; ++i) {
+//    if (colliding_[i]) {
+//      idx0 = gpu_.interactions[i];
+//      idx1 = gpu_.interactions[i + gpu_.Ninteractions];
+
+//      bodies_[idx0].collide_with(bodies_[idx1]);
+//      // Clean the second one up (first is new bigger planet)
+//      need_removing_[idx1] = true;
+//      at_least_one_needs_deleting = true;
+//    }
+//  }
+
+//  if (at_least_one_needs_deleting) {
+//    bodies_.erase(std::remove_if(bodies_.begin(),
+//                                 bodies_.end(),
+//                                 [this](const Body& i) {
+//                                   return need_removing_.at(&i - bodies_.data());
+//                                 }),
+//                                 bodies_.end());
+
+//    gpu_.resize(bodies_.size());
+//  }
+//}

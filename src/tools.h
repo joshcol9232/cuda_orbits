@@ -3,8 +3,6 @@
 
 namespace tools {
 
-double mass_from_radius(double r);
-
 double mass_from_radius(double r, double density);
 
 double inverse_volume_of_sphere(double volume);
