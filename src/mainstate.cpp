@@ -48,7 +48,32 @@ void MainState::update(double dt) {
 }
 
 void MainState::run_grav(double dt) {
+  double xdist, ydist, r, f, fx, fy;
+  for (size_t i = 0; i < bodies_.size()-1; ++i) {
+    for (size_t j = i+1; j < bodies_.size(); ++j) {
+      xdist = bodies_[j].x - bodies_[i].x;
+      ydist = bodies_[j].y - bodies_[i].y;
+      r = sqrt(xdist * xdist + ydist * ydist);
+      // Magnitude of f with ratio of distance
+      f = G * bodies_[i].m * bodies_[j].m / (r * r * r);
+      fx = f * xdist;
+      fy = f * ydist;
 
+      bodies_[i].r_fx += fx;
+      bodies_[i].r_fy += fy;
+      bodies_[j].r_fx -= fx;
+      bodies_[j].r_fy -= fy;
+    }
+  }
+
+  for (size_t i = 0; i < bodies_.size(); ++i) {
+    bodies_[i].vx += (bodies_[i].r_fx / bodies_[i].m) * dt;
+    bodies_[i].vy += (bodies_[i].r_fy / bodies_[i].m) * dt;
+    bodies_[i].x += bodies_[i].vx * dt;
+    bodies_[i].y += bodies_[i].vy * dt;
+    bodies_[i].r_fx = 0.0;
+    bodies_[i].r_fy = 0.0;
+  }
 }
 
 // Returns if any collide
