@@ -2,7 +2,6 @@
 #define MAINSTATE_H
 
 #include <vector>
-#include <SFML/Graphics.hpp>
 
 #include "body.h"
 
@@ -17,6 +16,13 @@ public:
 
   const std::vector<Body>& bodies() const { return bodies_; }
   size_t body_num() const { return bodies_.size(); }
+
+  // MPI
+  void send_body_num(int rank) const;   // to rank
+  void send_positions(int rank) const;
+  void send_masses(int rank) const;
+  void recv_forces(int rank);           // from rank
+
 private:
   std::vector<Body> bodies_;
   std::vector<bool> colliding_;

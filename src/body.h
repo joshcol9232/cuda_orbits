@@ -2,30 +2,33 @@
 #define BODY_H
 
 #include <cmath>
+#include <ostream>
 
 #include "tools.h"
 #include "commons.h"
+#include "vector2.h"
 
 class Body
 {
 public:
   Body() {}
-  Body(double x, double y, double r, double density = DENSITY) :
-    x(x), y(y), m(tools::mass_from_radius(r, density)), vx(0.0), vy(0.0),
-    r(r), density(density), r_fx(0.0), r_fy(0.0) {}
-  Body(double x, double y, double vx, double vy, double r, double density = DENSITY) :
-    x(x), y(y), m(tools::mass_from_radius(r, density)), vx(vx), vy(vy),
-    r(r), density(density), r_fx(0.0), r_fy(0.0) {}
+  Body(Vector2 x, double r, double density = DENSITY) :
+    x(x), m(tools::mass_from_radius(r, density)), v(0.0),
+    r(r), density(density) {}
+  Body(Vector2 x, Vector2 v, double r, double density = DENSITY) :
+    x(x), m(tools::mass_from_radius(r, density)), v(v),
+    r(r), density(density) {}
 
   void collide_with(const Body& other);
   void collide_with_no_join(Body& other);
 
-  double x, y;
-  double vx, vy;
+  Vector2 x;
+  Vector2 v;
   double density;
   double m;
   double r;
-  double r_fx, r_fy;  // Resultant forces
 };
+
+std::ostream& operator<<(std::ostream& out, const Body& b);
 
 #endif // BODY_H

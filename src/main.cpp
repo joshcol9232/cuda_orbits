@@ -7,13 +7,15 @@
 #include <cmath>
 #include <sstream>
 #include <utility>
+#include <fstream>
 
-#include <omp.h>
-#include <SFML/Graphics.hpp>
+#include <mpi.h>
 
 #include "commons.h"
 #include "body.h"
 #include "mainstate.h"
+#include "vector2.h"
+#include "mpistate.h"
 
 
 // ----- Spawning -----
@@ -27,7 +29,8 @@ void spawn_galaxy(std::vector<Body>& bodies, const double x,
   bodies.reserve(bodies.size() + num + 1);
 
   // Central body
-  Body inner(x, y, inner_body_rad, inner_density);
+  const Vector2 centre(x, y);
+  Body inner(centre, inner_body_rad, inner_density);
   const double& inner_mass = inner.m;
   bodies.emplace_back(inner);
 
@@ -37,17 +40,23 @@ void spawn_galaxy(std::vector<Body>& bodies, const double x,
   std::uniform_real_distribution<double> size_distribution(outer_body_rad_min, outer_body_rad_max);
   std::uniform_real_distribution<double> angle_distribution(0.0, M_PI * 2);
 
-  double r, v, theta, moon_radius;
+  double r, mag_v, theta, moon_radius;
+  Vector2 d_centre;
   Body b;
   for (size_t n = 0; n < num; ++n) {
     r = distribution(generator);
     theta = angle_distribution(generator);
     // sqrt(GM/r) = v
-    v = sqrt(G * inner_mass / r);
+    mag_v = sqrt(G * inner_mass / r);
     moon_radius = size_distribution(generator);
+    d_centre.x = r * cos(theta);
+    d_centre.y = r * sin(theta);
 
-    b = Body(r * cos(theta) + x, r * sin(theta) + y,
-             v * cos(theta + M_PI/2.0), v * sin(theta + M_PI/2.0), moon_radius);
+    b = Body(centre + d_centre,
+             Vector2(mag_v * cos(theta + M_PI/2.0),
+                     mag_v * sin(theta + M_PI/2.0)),
+             moon_radius);
+
     bodies.emplace_back(b);
   }
 }
@@ -77,15 +86,8 @@ void spawn_random_uniform(std::vector<Body>& bodies,
 // ------------
 
 
-int main() {
-  std::cout << "MAX THREADS: " << omp_get_max_threads() << std::endl;
-
-  std::vector<Body> bodies;
-
-  spawn_galaxy(bodies, 1280.0/2, 400.0,
-               20.0, 1000000.0,
-               50.0, 300.0,
-               0.25, 2.0, 800);
+int main(int argc, char** argv) {
+  MPI_Init(&argc, &argv);
 
   /*
   spawn_random_uniform(bodies,
@@ -104,59 +106,58 @@ int main() {
   */
 
   // Setup
-  MainState state(bodies);
+  int my_rank, world_size;
+  MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+  std::cout << my_rank << "/" << world_size << std::endl;
 
-  sf::Clock clock;
-  sf::ContextSettings settings;
-  settings.antialiasingLevel = 8;
+  if (my_rank == 0) {
+    std::vector<Body> bodies;
 
-  sf::RenderWindow window(sf::VideoMode(1280, 800), "SFML", sf::Style::Default, settings);
-  window.setFramerateLimit(144);
-  window.setVerticalSyncEnabled(true);
+    spawn_galaxy(bodies, 1280.0/2, 400.0,
+                 20.0, 1000000.0,
+                 50.0, 300.0,
+                 0.25, 2.0, 800);
 
-  sf::Font font;
-  font.loadFromFile("/usr/share/fonts/ubuntu/Ubuntu-R.ttf");
+    MainState state(bodies);
 
-  sf::Text fps_text;
-  fps_text.setFont(font); // font is a sf::Font
-  fps_text.setCharacterSize(16);
-  fps_text.setFillColor(sf::Color::Green);
+    for (int r = 1; r < world_size; ++r) {
+      state.send_body_num(r);
+    }
 
-  sf::CircleShape body_shape(1.f);
-  body_shape.setFillColor(sf::Color::White);
+    // Output file
+    std::cout << "Opening file..." << std::endl;
+    std::ofstream out_file("/tmp/jcolclou/out.txt",
+                           std::ofstream::out);
+    std::cout << "File opened" << std::endl;
 
-  sf::Time elapsed;
-  double dt;
+    const double DT = 1.0/60.0;
+    const size_t max_loop = 1;
+    double t = 0.0;
+    size_t f_num = 0;
 
-  // Main loop
-  while (window.isOpen()) {
-    sf::Event event;
+    // Main loop
+    while (f_num < max_loop) {
+      std::cout << "Doing frame " << f_num << std::endl;
+      state.update(DT);
 
-    while (window.pollEvent(event)) {
-      if (event.type == sf::Event::Closed) {
-        window.close();
+      for (const auto & b : state.bodies()) {
+        out_file << b << "!";
       }
+      out_file << std::endl;
+
+      ++f_num;
     }
 
-    elapsed = clock.restart();
-    dt = static_cast<double>(elapsed.asSeconds());
+    out_file.close();
+  } else {
+    std::cout << "HELLO FROM RANK " << my_rank << " :)" << std::endl;
 
-    state.update(dt);
-
-    window.clear();
-    for (const auto & b : state.bodies()) {
-      body_shape.setPosition(b.x - b.r, b.y - b.r);
-      body_shape.setScale(b.r, b.r);
-      window.draw(body_shape);
-    }
-
-    std::stringstream os;
-    os << "FPS: " << 1.0/dt << std::endl
-       << "Bodies: " << state.body_num();
-    fps_text.setString(os.str());
-    window.draw(fps_text);
-    window.display();
+    MPIState my_state(my_rank);
+    my_state.recv_body_num();
   }
+
+  MPI_Finalize();
 
   return 0;
 }

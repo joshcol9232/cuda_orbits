@@ -1,39 +1,11 @@
 #include <algorithm>
+#include <mpi.h>
+#include <iostream>
 
 #include "mainstate.h"
 #include "body.h"
+#include "mpimsg.h"
 
-/*
-// --- CUDA ---
-__global__ void grav(const Body *__restrict bodies,
-                     const size_t *__restrict interactions, // 2D Index map. len = 2N interaction
-                     double *__restrict f_x, double *__restrict f_y, // Force from 1 -> 2. len = N interaction
-                     double *__restrict dist,
-                     const size_t N) {
-  // Calculate global thread ID
-  size_t tid = (blockIdx.x * blockDim.x) + threadIdx.x;
-  if (tid >= N) return;
-
-  const Body& body1 = bodies[interactions[tid]];
-  const Body& body2 = bodies[interactions[tid + N]];
-
-  // F_vec = m a_vec
-  // F_vec = (GMm/r^3) * r_vec
-
-  const double xdist = body2.x - body1.x;
-  const double ydist = body2.y - body1.y;
-  const double r = sqrt(xdist * xdist + ydist * ydist);
-  dist[tid] = r;
-  // Magnitude of f with ratio of distance
-  const double f = G * body1.m * body2.m / (r * r * r);
-
-  // Force for this interaction
-  f_x[tid] = f * xdist;
-  f_y[tid] = f * ydist;
-}
-
-// --------------------
-*/
 
 MainState::MainState(std::vector<Body> bodies) :
   bodies_(bodies)
@@ -48,31 +20,38 @@ void MainState::update(double dt) {
 }
 
 void MainState::run_grav(double dt) {
-  double xdist, ydist, r, f, fx, fy;
+  double r, f;
+  Vector2 dist_vec, f_vec;
+  std::vector<Vector2> forces(tools::interaction_num(bodies_.size()), Vector2());
+
+  size_t idx = 0;
   for (size_t i = 0; i < bodies_.size()-1; ++i) {
     for (size_t j = i+1; j < bodies_.size(); ++j) {
-      xdist = bodies_[j].x - bodies_[i].x;
-      ydist = bodies_[j].y - bodies_[i].y;
-      r = sqrt(xdist * xdist + ydist * ydist);
+      dist_vec = bodies_[j].x - bodies_[i].x;
+      r = dist_vec.norm();
       // Magnitude of f with ratio of distance
       f = G * bodies_[i].m * bodies_[j].m / (r * r * r);
-      fx = f * xdist;
-      fy = f * ydist;
+      f_vec = dist_vec * f;
 
-      bodies_[i].r_fx += fx;
-      bodies_[i].r_fy += fy;
-      bodies_[j].r_fx -= fx;
-      bodies_[j].r_fy -= fy;
+      forces[idx] += f_vec;
+      ++idx;
     }
   }
 
+  // Resolve acceleration
+  idx = 0;
+  for (size_t i = 0; i < bodies_.size()-1; ++i) {
+    for (size_t j = i+1; j < bodies_.size(); ++j) {
+      bodies_[i].v += (forces[idx] / bodies_[i].m) * dt;
+      bodies_[j].v -= (forces[idx] / bodies_[j].m) * dt;
+      ++idx;
+    }
+  }
+
+  // Resolve change in x
+#pragma omp parallel for
   for (size_t i = 0; i < bodies_.size(); ++i) {
-    bodies_[i].vx += (bodies_[i].r_fx / bodies_[i].m) * dt;
-    bodies_[i].vy += (bodies_[i].r_fy / bodies_[i].m) * dt;
-    bodies_[i].x += bodies_[i].vx * dt;
-    bodies_[i].y += bodies_[i].vy * dt;
-    bodies_[i].r_fx = 0.0;
-    bodies_[i].r_fy = 0.0;
+    bodies_[i].x += bodies_[i].v * dt;
   }
 }
 
@@ -83,4 +62,16 @@ bool MainState::check_coll() {
 
 void MainState::collision_pass() {
 
+}
+
+void MainState::send_body_num(int rank) const {
+  int body_num = bodies_.size();
+  std::cout << "DEBUG [0(hardc)] - Sending body num to " << rank << std::endl;
+  MPI_Send(&body_num,
+           1,
+           MPI_INT,
+           rank,
+           static_cast<int>(MPIMsg::BodyNum),
+           MPI_COMM_WORLD);
+  std::cout << "DEBUG[0(hardc)] - Body num sent." << std::endl;
 }
