@@ -119,11 +119,8 @@ int main(int argc, char** argv) {
                  50.0, 300.0,
                  0.25, 2.0, 800);
 
-    MainState state(bodies);
-
-    for (int r = 1; r < world_size; ++r) {
-      state.send_body_num(r);
-    }
+    MainState state(bodies, world_size);
+    state.init_mpi_data();
 
     // Output file
     std::cout << "Opening file..." << std::endl;
@@ -132,7 +129,7 @@ int main(int argc, char** argv) {
     std::cout << "File opened" << std::endl;
 
     const double DT = 1.0/60.0;
-    const size_t max_loop = 1;
+    const size_t max_loop = 3;
     double t = 0.0;
     size_t f_num = 0;
 
@@ -153,8 +150,8 @@ int main(int argc, char** argv) {
   } else {
     std::cout << "HELLO FROM RANK " << my_rank << " :)" << std::endl;
 
-    MPIState my_state(my_rank);
-    my_state.recv_body_num();
+    MPIState my_state(my_rank, world_size);
+    my_state.init();
   }
 
   MPI_Finalize();

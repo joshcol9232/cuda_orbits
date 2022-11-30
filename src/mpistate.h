@@ -8,7 +8,7 @@
 class MPIState
 {
 public:
-  MPIState(int my_rank);
+  MPIState(int my_rank, int world_size);
 
   void init();
   void recv_body_num();
@@ -17,12 +17,15 @@ public:
   void send_forces() const;
 
 private:
-  int my_rank_;
+  // MPI
+  int my_rank_, world_size_;
+  MPI_Status mpi_status_;
+
   // The rank owns bodies, then has to output forces.
   int body_num_;
-  std::vector<Vector2> positions_;   // In
-  std::vector<Vector2> masses_;      // In
-  std::vector<Vector2> forces_;      // Out
+  std::vector<double> positions_;   // In
+  std::vector<double> masses_;      // In
+  std::vector<double> forces_;      // Out
 };
 
 #endif // MPISTATE_H

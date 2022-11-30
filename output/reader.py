@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import numpy as np
+from sys import argv
 
 INPUT_F = "/tmp/jcolclou/out.txt"
 
@@ -52,8 +53,12 @@ def update(frame):
   displayed.set_sizes(radii[frame])
   return displayed,
 
+interval = 10
+if len(argv) > 1:
+  interval = int(argv[1])
+
 ani = FuncAnimation(fig, update, frames=range(len(positions)), init_func=init,
-                    blit=True, interval=10)
+                    blit=True, interval=interval)
 
 plt.gca().set_aspect("equal")
 plt.show()
