@@ -18,10 +18,10 @@ void check_mpi_err(const MPI_Status& s);
 template<typename T>
 void print_vector(const std::vector<T>& v) {
   std::cout << "{";
-  for (auto & element : v) {
-    std::cout << element << ", ";
+  for (size_t i = 0; i < v.size()-1; ++i) {
+    std::cout << v[i] << ", ";
   }
-  std::cout << "}" << std::endl;
+  std::cout << v[v.size()-1] << "}" << std::endl;
 }
 
 }  // namespace tools

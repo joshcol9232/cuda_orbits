@@ -10,10 +10,12 @@
 
 MainState::MainState(std::vector<Body> bodies, int world_size) :
   bodies_(bodies), world_size_(world_size),
-  body_num_per_rank_(bodies.size() / world_size)
+  body_num_per_rank_(bodies.size() / world_size),
+  interaction_num_(tools::interaction_num(bodies.size()))
 {
   colliding_.assign(bodies.size(), false);
   need_removing_.assign(bodies.size(), false);
+  interaction_num_per_rank_ = interaction_num_ / world_size_;
 }
 
 void MainState::update(double dt) {
@@ -87,12 +89,14 @@ void MainState::send_body_num(int rank) const {
 
 std::vector<double> MainState::serialize_positions(int rank) const {
   int expected_size = (bodies_.size() / world_size_) * 2;
-  std::vector<double> pos(expected_size);
+  std::vector<double> pos(expected_size, 0.0);
 
+  size_t idx = 0;
   const size_t i_offset = body_num_per_rank_ * rank;
   for (size_t i = 0; i < body_num_per_rank_; ++i) {
-    pos.push_back(bodies_[i + i_offset].x.x);
-    pos.push_back(bodies_[i + i_offset].x.y);
+    pos[idx] = (bodies_[i + i_offset].x.x);
+    pos[idx+1] = (bodies_[i + i_offset].x.y);
+    idx += 2;
   }
   return pos;
 }
@@ -113,12 +117,16 @@ void MainState::send_positions(int rank) const {
 void MainState::send_masses(int rank) const {
   DEBUG_OUT_MAINSTATE << "Sending masses to " << rank << std::endl;
 
-  std::vector<double> masses(body_num_per_rank_);
+  std::vector<double> masses(body_num_per_rank_, 0.0);
+  DEBUG_OUT_MAINSTATE << "Masses size before alloc: " << masses.size() << std::endl;
 
   const size_t i_offset = body_num_per_rank_ * rank;
   for (size_t i = 0; i < body_num_per_rank_; ++i) {
-    masses.push_back(bodies_[i + i_offset].m);
+    masses[i] = bodies_.at(i + i_offset).m;
   }
+
+  DEBUG_OUT_MAINSTATE << "Masses before transit: " << masses.size() << std::endl;
+  tools::print_vector(masses);
 
   MPI_Send(&masses[0],
            body_num_per_rank_,

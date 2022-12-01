@@ -43,7 +43,6 @@ void MPIState::recv_positions() {
   tools::check_mpi_err(mpi_status_);
 
   DEBUG_OUT << "Positions recieved. Num: " << positions_.size() << std::endl;
-  tools::print_vector(positions_);
 }
 
 void MPIState::recv_masses() {
@@ -59,6 +58,7 @@ void MPIState::recv_masses() {
   tools::check_mpi_err(mpi_status_);
 
   DEBUG_OUT << "Masses recieved. Num: " << masses_.size() << std::endl;
+  tools::print_vector(masses_);
 }
 
 void MPIState::send_forces() const {}

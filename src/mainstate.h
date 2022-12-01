@@ -28,6 +28,7 @@ public:
 
 private:
   int world_size_, body_num_per_rank_;
+  int interaction_num_, interaction_num_per_rank_;
   std::vector<Body> bodies_;
   std::vector<bool> colliding_;
   std::vector<bool> need_removing_;
