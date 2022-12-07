@@ -44,8 +44,8 @@ fig, ax = plt.subplots()
 displayed = ax.scatter(np.zeros(len(positions[0])), np.zeros(len(positions[0])), s=np.ones(len(positions[0])), c="k")
 
 def init():
-  ax.set_xlim(200, 1000)
-  ax.set_ylim(0, 800)
+  ax.set_xlim(-200, 200)
+  ax.set_ylim(-200, 200)
   return displayed,
 
 def update(frame):

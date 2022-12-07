@@ -1,160 +1,112 @@
-#include <cassert>
 #include <iostream>
-#include <stdio.h>
-#include <stdlib.h>
-#include <vector>
-#include <random>
-#include <cmath>
-#include <sstream>
-#include <utility>
 #include <fstream>
+#include <vector>
 
 #include <mpi.h>
 
-#include "commons.h"
-#include "body.h"
-#include "mainstate.h"
 #include "vector2.h"
-#include "mpistate.h"
+#include "tools.h"
 
 
-// ----- Spawning -----
-void spawn_galaxy(std::vector<Body>& bodies, const double x,
-                  const double y, const double inner_body_rad,
-                  const double inner_density,
-                  const double inner_rad, const double outer_rad,
-                  const double outer_body_rad_min,
-                  const double outer_body_rad_max,
-                  const size_t num) {
-  bodies.reserve(bodies.size() + num + 1);
+#define DEBUG_OUT_MAINSTATE std::cout << "DEBUG[0 (hardc)] - "
+#define DEBUG_OUT std::cout << "DEBUG[" << my_rank << "] - "
 
-  // Central body
-  const Vector2 centre(x, y);
-  Body inner(centre, inner_body_rad, inner_density);
-  const double& inner_mass = inner.m;
-  bodies.emplace_back(inner);
+constexpr double DT = 1.0/60.0;
+constexpr size_t MAX_FRAME = 100;
 
-  // Make random gen
-  std::default_random_engine generator;
-  std::uniform_real_distribution<double> distribution(inner_rad, outer_rad);
-  std::uniform_real_distribution<double> size_distribution(outer_body_rad_min, outer_body_rad_max);
-  std::uniform_real_distribution<double> angle_distribution(0.0, M_PI * 2);
+/* IDEAS:
+ * - Body mapping can be done using min() - find lowest index. Then arrange bodies in body list
+ *   sent to rank in that order. Easily maps between rank & main rank
+ *
+ *
+ */
 
-  double r, mag_v, theta, moon_radius;
-  Vector2 d_centre;
-  Body b;
-  for (size_t n = 0; n < num; ++n) {
-    r = distribution(generator);
-    theta = angle_distribution(generator);
-    // sqrt(GM/r) = v
-    mag_v = sqrt(G * inner_mass / r);
-    moon_radius = size_distribution(generator);
-    d_centre.x = r * cos(theta);
-    d_centre.y = r * sin(theta);
+void write_frame_to_file(std::ofstream& f,
+                         const std::vector<Vector2>& x,
+                         const std::vector<double>& r) {
 
-    b = Body(centre + d_centre,
-             Vector2(mag_v * cos(theta + M_PI/2.0),
-                     mag_v * sin(theta + M_PI/2.0)),
-             moon_radius);
-
-    bodies.emplace_back(b);
+  for (size_t i = 0; i < x.size(); ++i) {
+    f << x[i] << ";" << r[i] << ";!";
   }
+  f << std::endl;
 }
-
-void spawn_random_uniform(std::vector<Body>& bodies,
-                          const double x_min, const double x_max,
-                          const double y_min, const double y_max,
-                          const double r_min, const double r_max,
-                          const size_t num) {
-  std::default_random_engine generator;
-  std::uniform_real_distribution<double> xdistr(x_min, x_max);
-  std::uniform_real_distribution<double> ydistr(y_min, y_max);
-  std::uniform_real_distribution<double> rdistr(r_min, r_max);
-
-  bodies.reserve(num);
-
-  double x, y, r;
-  for (size_t n = 0; n < num; ++n) {
-    x = xdistr(generator);
-    y = ydistr(generator);
-    r = rdistr(generator);
-
-    bodies.push_back(Body(x, y, r));
-  }
-}
-
-// ------------
-
 
 int main(int argc, char** argv) {
   MPI_Init(&argc, &argv);
-
-  /*
-  spawn_random_uniform(bodies,
-                       0.0, 1280.0/5,
-                       0.0, 800.0/5,
-                       1.0, 1.0,
-                       1000);
-  */
-
-  /*
-  bodies = {
-    Body(100.0, 100.0, 10.0),
-    Body(100.0, 200.0, 10.0),
-    Body(150.0, 155.1, 25.0)
-  };
-  */
 
   // Setup
   int my_rank, world_size;
   MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
   MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-  std::cout << my_rank << "/" << world_size << std::endl;
+
+  std::vector<Vector2> x;
+  std::vector<Vector2> v;
+  std::vector<double> m;
+  std::vector<double> r;
+
+  std::vector<size_t> my_interactions;
+
+  std::ofstream out_file;
 
   if (my_rank == 0) {
-    std::vector<Body> bodies;
+    DEBUG_OUT_MAINSTATE << "My rank is 0 :)" << std::endl;
 
-    spawn_galaxy(bodies, 1280.0/2, 400.0,
-                 20.0, 1000000.0,
-                 50.0, 300.0,
-                 0.25, 2.0, 800);
+    DEBUG_OUT_MAINSTATE << "Opening file..." << std::endl;
+    out_file = std::ofstream("/tmp/jcolclou/out.txt",
+                             std::ofstream::out);
+    DEBUG_OUT_MAINSTATE << "File opened" << std::endl;
 
-    MainState state(bodies, world_size);
-    state.init_mpi_data();
 
-    // Output file
-    std::cout << "Opening file..." << std::endl;
-    std::ofstream out_file("/tmp/jcolclou/out.txt",
-                           std::ofstream::out);
-    std::cout << "File opened" << std::endl;
+    // Make bodies
+    x = { Vector2(0.0, 0.0), Vector2(100.0, 0.01), Vector2(50.0, 50.0), Vector2(150.0, 150.0) };
+    v = { Vector2(0.0, 1.0), Vector2(10.0, 0.1), Vector2(), Vector2(-100.0, -100.0) };
+    m = { 1000.0, 1000.0, 1000.0, 1500.0 };
+    r = { 10.0, 10.0, 10.0, 15.0 };
 
-    const double DT = 1.0/60.0;
-    const size_t max_loop = 3;
-    double t = 0.0;
-    size_t f_num = 0;
+    // Partition interactions
+    const size_t interaction_num = tools::interaction_num(x.size());
 
-    // Main loop
-    while (f_num < max_loop) {
-      std::cout << "Doing frame " << f_num << std::endl;
-      state.update(DT);
+    const size_t partition_size = interaction_num / world_size;
 
-      for (const auto & b : state.bodies()) {
-        out_file << b << "!";
+    std::vector<std::vector<size_t>> interactions(world_size,
+                                                  std::vector<size_t>(partition_size * 2, 0));
+
+    std::vector<std::vector<size_t>> mappings(world_size,
+                                              std::vector<size_t>(partition_size, 0));
+
+    size_t idx = 0;
+    int destination_rank = -1;
+    for (size_t i = 0; i < x.size()-1; ++i) {
+      for (size_t j = i + 1; j < x.size(); ++j) {
+        if ((idx/2) % partition_size == 0) {
+          ++destination_rank;
+        }
+        interactions[destination_rank][idx % (2 * partition_size)] = i;
+        interactions[destination_rank][idx % (2 * partition_size) + 1] = j;
+
+        idx += 2;
       }
-      out_file << std::endl;
-
-      ++f_num;
     }
 
-    out_file.close();
-  } else {
-    std::cout << "HELLO FROM RANK " << my_rank << " :)" << std::endl;
+    size_t i = 0;
+    for (auto & inter : interactions) {
+      DEBUG_OUT_MAINSTATE << "Rank " << i << " interactions: ";
+      tools::print_vector(inter);
+      ++i;
+    }
 
-    MPIState my_state(my_rank, world_size);
-    my_state.init();
+    my_interactions = interactions[0];
+
+    write_frame_to_file(out_file, x, r);
   }
 
-  MPI_Finalize();
+
+  // Do some things on all ranks
+  DEBUG_OUT << "Hi from this rank" << std::endl;
+
+  if (my_rank == 0) {
+    out_file.close();
+  }
 
   return 0;
 }
